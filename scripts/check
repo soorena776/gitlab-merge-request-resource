@@ -6,7 +6,7 @@ set -e -u
 exec 3>&1 # make stdout available as fd 3 for the result
 exec 1>&2 # redirect all output to stderr for logging
 
-echo "start" > &2
+>&2 echo "start" 
 
 TMPDIR=${TMPDIR:-/tmp}
 
@@ -40,10 +40,13 @@ if [ "${no_ssl}" == 'true' ]; then
     protocol='http'
 fi
 
+
+>&2 echo "${project_path}", urlencode "${project_path}"
+
 version_updated_at=0
 if [ ! -z "${version_sha}" ]; then
     version_updated_at="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/$(urlencode "${project_path}")/repository/commits/${version_sha}" \
-        | jq '.committed_date|.[:19]|strptime("%Y-%m-%dT%H:%M:%S")|mktime')"
+            | jq '.committed_date|.[:19]|strptime("%Y-%m-%dT%H:%M:%S")|mktime')"
 fi
 
 open_mrs="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/$(urlencode "${project_path}")/merge_requests?state=opened&order_by=updated_at")"
