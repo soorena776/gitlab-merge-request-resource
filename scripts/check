@@ -4,9 +4,9 @@
 set -e -u
 
 exec 3>&1 # make stdout available as fd 3 for the result
-# exec 1>&2 # redirect all output to stderr for logging
+exec 1>&2 # redirect all output to stderr for logging
 
-echo "start" 
+echo "start" >&2
 
 TMPDIR=${TMPDIR:-/tmp}
 
@@ -19,7 +19,6 @@ cat > "${payload}" <&0
 configure_ssl_verification "${payload}"
 
 uri="$(jq -r '.source.uri // ""' < "${payload}")"
-echo "uri: ${uri}" > &2
 private_token="$(jq -r '.source.private_token // ""' < "${payload}")"
 no_ssl="$(jq -r '.source.no_ssl // ""' < "${payload}")"
 version_sha="$(jq -r '.version.sha // ""' < "${payload}")"
@@ -39,9 +38,6 @@ fi
 if [ "${no_ssl}" == 'true' ]; then
     protocol='http'
 fi
-
-
->&2 echo "${project_path}", urlencode "${project_path}"
 
 version_updated_at=0
 if [ ! -z "${version_sha}" ]; then
