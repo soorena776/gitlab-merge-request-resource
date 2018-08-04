@@ -6,8 +6,6 @@ set -e -u
 exec 3>&1 # make stdout available as fd 3 for the result
 exec 1>&2 # redirect all output to stderr for logging
 
-echo "start" >&2
-
 TMPDIR=${TMPDIR:-/tmp}
 
 source "$(dirname "$0")/common.sh"
@@ -41,11 +39,11 @@ fi
 
 version_updated_at=0
 if [ ! -z "${version_sha}" ]; then
-    version_updated_at="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/724/repository/commits/${version_sha}" \
+    version_updated_at="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/$(urlencode "${project_path}")/repository/commits/${version_sha}" \
             | jq '.committed_date|.[:19]|strptime("%Y-%m-%dT%H:%M:%S")|mktime')"
 fi
 
-open_mrs="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/724/merge_requests?state=opened&order_by=updated_at")"
+open_mrs="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/$(urlencode "${project_path}")/merge_requests?state=opened&order_by=updated_at")"
 num_mrs="$(echo "${open_mrs}" | jq 'length')"
 
 new_versions=''
@@ -54,7 +52,7 @@ for i in $(seq 0 $((num_mrs - 1))); do
     mr="$(echo "${open_mrs}" | jq -r '.['"$i"']')"
     mr_sha="$(echo "${mr}" | jq -r '.sha')"
     if [ "${mr_sha}" != "null" ]; then
-        mr_updated_at="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/724/repository/commits/${mr_sha}" \
+        mr_updated_at="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/$(urlencode "${project_path}")/repository/commits/${mr_sha}" \
             | jq '.committed_date|.[:19]|strptime("%Y-%m-%dT%H:%M:%S")|mktime')"
         if [ "${mr_updated_at}" -gt "${version_updated_at}" ] || [ -z "${version_sha}" ]; then
             new_versions="${new_versions},{\"sha\":\"${mr_sha}\"}"
