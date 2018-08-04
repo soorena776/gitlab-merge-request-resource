@@ -40,7 +40,7 @@ fi
 version_updated_at=0
 if [ ! -z "${version_sha}" ]; then
     version_updated_at="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/$(urlencode "${project_path}")/repository/commits/${version_sha}" \
-            | jq '.committed_date|.[:19]|strptime("%Y-%m-%dT%H:%M:%S")|mktime')"
+        | jq '.committed_date|.[:19]|strptime("%Y-%m-%dT%H:%M:%S")|mktime')"
 fi
 
 open_mrs="$(curl -s -H "private-token: ${private_token}" "${protocol}://${gitlab_host}/api/v4/projects/$(urlencode "${project_path}")/merge_requests?state=opened&order_by=updated_at")"
