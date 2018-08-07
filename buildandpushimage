@@ -1,0 +1,10 @@
+#!/bin/bash
+set -o errexit -o nounset
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd $DIR/gitlabres
+go build
+go test
+
+cd $DIR
+docker build -t soorena776/gitlab-merge-request-resource  . 
+docker push soorena776/gitlab-merge-request-resource:latest
