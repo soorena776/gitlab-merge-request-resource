@@ -13,13 +13,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type Payload struct {
 	Source  Psource `json:"source"`
-	Version SHA     `json:"version"`
+	Version Version `json:"version"`
 	Params  Params  `json:"params"`
 }
 
@@ -36,12 +37,18 @@ type Psource struct {
 }
 
 type CommitStatus struct {
-	Status     string `json:"status"`
-	FinishedAt string `json:"finished_at"`
+	Status      string `json:"status"`
+	FinishedAt  string `json:"finished_at"`
+	Description string `json:"description"`
 }
 
-type SHA struct {
+type MergeRequest struct {
 	SHA string `json:"sha"`
+}
+
+type Version struct {
+	SHA      string `json:"sha"`
+	BuildNum string `json:"build_num"`
 }
 
 type Params struct {
@@ -147,6 +154,11 @@ func out(sourceFolder string) map[string]map[string]string {
 	panicIfErr(os.Chdir(sourceFolder))
 	panicIfErr(os.Chdir(payload.Params.Repository))
 
+	targetVersionBytes, err := ioutil.ReadFile(sourceFolder + "/version/target_version.txt")
+	panicIfErr(err)
+	targetVersion := Version{}
+	panicIfErr(json.Unmarshal(targetVersionBytes, &targetVersion))
+
 	targetURL := fmt.Sprintf("%s/teams/%s/pipelines/%s/jobs/%s/builds/%s",
 		payload.Source.ConcourseHost,
 		url.PathEscape(os.Getenv("BUILD_TEAM_NAME")),
@@ -154,14 +166,11 @@ func out(sourceFolder string) map[string]map[string]string {
 		url.PathEscape(os.Getenv("BUILD_JOB_NAME")),
 		url.PathEscape(os.Getenv("BUILD_NAME")))
 
-	out, err := exec.Command("git", "log", "--skip=1", "--format=%H", "-n", "1").Output()
-	panicIfErr(err)
-	commitSHA := strings.Trim(string(out), "\n\" ")
-
 	bodyJSON, err := json.Marshal(map[string]interface{}{
-		"name":       payload.Params.BuildLabel,
-		"state":      payload.Params.Status,
-		"target_url": targetURL,
+		"name":        payload.Params.BuildLabel,
+		"state":       payload.Params.Status,
+		"target_url":  targetURL,
+		"description": targetVersion.BuildNum,
 	})
 	panicIfErr(err)
 
@@ -169,11 +178,11 @@ func out(sourceFolder string) map[string]map[string]string {
 		"Content-Type": "application/json",
 	}
 
-	sendAPIRequest("POST", "statuses/"+commitSHA, bodyJSON, header)
+	sendAPIRequest("POST", "statuses/"+targetVersion.SHA, bodyJSON, header)
 
 	return map[string]map[string]string{
 		"version": map[string]string{
-			"sha": fmt.Sprintf("%s", commitSHA),
+			"sha": fmt.Sprintf("%s", targetVersion.SHA),
 		},
 	}
 }
@@ -199,53 +208,55 @@ func in(destFolder string) map[string]interface{} {
 		panicIfErr(ioutil.WriteFile(os.ExpandEnv("$HOME/.netrc"), []byte(defLogin), 0644))
 	}
 
-	panicIfErrMsg(exec.Command("git", "clone", payload.Source.URI, destFolder).Run(), "Cannot clone the repository")
-	panicIfErrMsg(os.Chdir(destFolder), "Cannot go to destination folder")
-
-	gitmerge := exec.Command("git", "merge", "-m", "local merge", payload.Version.SHA)
-	stderr, err := gitmerge.StderrPipe()
+	targetVersion, err := json.Marshal(payload.Version)
 	panicIfErr(err)
-	panicIfErr(gitmerge.Start())
-	slurp, _ := ioutil.ReadAll(stderr)
-	if err = gitmerge.Wait(); err != nil {
-		panicIfErr(fmt.Errorf("merge error: %s/n", string(slurp)))
-	}
+	panicIfErr(os.MkdirAll(destFolder, os.ModeDir|0744))
+	panicIfErr(ioutil.WriteFile(destFolder+"/target_version.txt", targetVersion, 0644))
+
+	panicIfErrMsg(exec.Command("git", "clone", payload.Source.URI, destFolder+"/repo").Run(), "Cannot clone the repository")
+	panicIfErrMsg(os.Chdir(destFolder+"/repo"), "Cannot go to destination folder")
+
+	mergeResult, err := exec.Command("git", "merge", "-m", "local merge", payload.Version.SHA).Output()
+	panicIfErrMsg(err, "Merge error: "+string(mergeResult))
 
 	return map[string]interface{}{"version": payload.Version}
 }
 
-func check() []SHA {
+func check() []Version {
 
-	var openMRsSHA []SHA
+	var openMRsSHA []MergeRequest
 	resp := sendAPIRequest("GET", "merge_requests?state=opened&order_by=updated_at", nil, nil)
 	panicIfErr(json.Unmarshal(resp, &openMRsSHA))
 
+	needABuild := []Version{}
 	// find out the first merge request that needs a build
 	for _, mr := range openMRsSHA {
-		if mrNeedsBuild(mr.SHA) {
-			return []SHA{mr}
+
+		resp := sendAPIRequest("GET", fmt.Sprintf("repository/commits/%s/statuses", mr.SHA), nil, nil)
+		var commitStatuses []*CommitStatus
+		panicIfErrMsg(json.Unmarshal(resp, &commitStatuses), "Unable to unmarshal merge request the response")
+		if len(commitStatuses) == 0 {
+			// no builds before for this commit. needs a build
+			needABuild = append(needABuild, Version{SHA: mr.SHA, BuildNum: "Build 1"})
+		} else if num := nextBuildIfExpired(commitStatuses[0]); num != "" {
+			needABuild = append(needABuild, Version{SHA: mr.SHA, BuildNum: num})
 		}
 	}
 
-	return []SHA{payload.Version}
-}
-
-// a merge request (mr) needs a build if either hasn't had a build before, or has a successfull build which is expired
-func mrNeedsBuild(latestVersion string) bool {
-	resp := sendAPIRequest("GET", fmt.Sprintf("repository/commits/%s/statuses", latestVersion), nil, nil)
-
-	var commitStatuses []*CommitStatus
-	panicIfErrMsg(json.Unmarshal(resp, &commitStatuses), "Unable to unmarshal merge request the response")
-
-	if len(commitStatuses) == 0 {
-		// no builds before for this commit. needs a build
-		return true
+	if len(needABuild) == 0 {
+		return []Version{payload.Version}
 	}
 
-	commitStatus := commitStatuses[0]
+	return needABuild
+
+}
+
+//nextBuildIfExpired returns an integer for the next build number given a commit build status. -1 means no new build is needed
+func nextBuildIfExpired(commitStatus *CommitStatus) string {
+
 	// first see if it has previously succeeded. No need to rebuild an already failing commit
 	if commitStatus.Status != "success" {
-		return false
+		return ""
 	}
 
 	finishedAt := parseTime(commitStatus.FinishedAt)
@@ -259,10 +270,18 @@ func mrNeedsBuild(latestVersion string) bool {
 
 	// then see if the build is expired
 	if finishedAt.Add(expDuration).Before(time.Now().UTC()) {
-		return true
+		num := "Build 2"
+		if strings.Contains(commitStatus.Description, "Build ") {
+			lastBuildNum, err := strconv.Atoi(commitStatus.Description[len("Build "):])
+			if err == nil {
+				num = fmt.Sprintf("Build %d", lastBuildNum+1)
+			}
+		}
+
+		return num
 	}
 
-	return false
+	return ""
 }
 
 func parseTime(timestr string) time.Time {
