@@ -17,8 +17,6 @@ import (
 	"time"
 )
 
-const DateTimeLayout = "2006-01-02T15:04:05.000-07:00"
-
 type Payload struct {
 	Source  Psource           `json:"source"`
 	Version map[string]string `json:"version"`
@@ -51,6 +49,8 @@ type Params struct {
 }
 
 const defaultBuildLabel = "Concourse"
+
+var dateLayouts = [...]string{"2006-01-02T15:04:05.000-07:00", "2006-01-02T15:04:05.000Z"}
 
 var gitlabAPIbase string
 var payload Payload
@@ -151,14 +151,14 @@ func out(sourceFolder string) map[string]map[string]string {
 		url.PathEscape(os.Getenv("BUILD_JOB_NAME")),
 		url.PathEscape(os.Getenv("BUILD_NAME")))
 
-	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	out, err := exec.Command("git", "log", "--skip=1", "--format=%H", "-n", "1").Output()
 	panicIfErr(err)
-	commitSHA := strings.TrimSpace(string(out))
+	commitSHA := strings.Trim(string(out), "\n\" ")
 
 	bodyJSON, err := json.Marshal(map[string]interface{}{
-		"state":       payload.Params.Status,
-		"build_label": payload.Params.BuildLabel,
-		"target_url":  targetURL,
+		"name":       payload.Params.BuildLabel,
+		"state":      payload.Params.Status,
+		"target_url": targetURL,
 	})
 	panicIfErr(err)
 
@@ -170,7 +170,7 @@ func out(sourceFolder string) map[string]map[string]string {
 
 	return map[string]map[string]string{
 		"version": map[string]string{
-			"sha": fmt.Sprintf("\"%s\"", commitSHA),
+			"sha": fmt.Sprintf("%s", commitSHA),
 		},
 	}
 }
@@ -196,17 +196,16 @@ func in(destFolder string) map[string]map[string]string {
 		panicIfErr(ioutil.WriteFile(os.ExpandEnv("$HOME/.netrc"), []byte(defLogin), 0644))
 	}
 
-	panicIfErr(exec.Command("git", "clone", payload.Source.URI, destFolder).Run())
-	panicIfErr(os.Chdir(destFolder))
+	panicIfErrMsg(exec.Command("git", "clone", payload.Source.URI, destFolder).Run(), "Cannot clone the repository")
+	panicIfErrMsg(os.Chdir(destFolder), "Cannot go to destination folder")
 
-	gitmerge := exec.Command("git", "merge", payload.Version["sha"])
+	gitmerge := exec.Command("git", "merge", "-m", "local merge", payload.Version["sha"])
 	stderr, err := gitmerge.StderrPipe()
 	panicIfErr(err)
 	panicIfErr(gitmerge.Start())
 	slurp, _ := ioutil.ReadAll(stderr)
 	if err = gitmerge.Wait(); err != nil {
-		fmt.Fprintf(os.Stderr, "merge error: %s/n", string(slurp))
-		panicIfErr(err)
+		panicIfErr(fmt.Errorf("merge error: %s/n", string(slurp)))
 	}
 
 	return map[string]map[string]string{"version": payload.Version}
@@ -217,38 +216,43 @@ func check() []*MergeRequest {
 	latestVersion := payload.Version["sha"]
 	lastProcessedMrCommitTs := time.Time{}
 	if len(latestVersion) != 0 {
-		lastProcessedMrCommitTs = getMRLastUpdate(latestVersion)
+		lastProcessedMrCommitTs = getMRLastCommitTimestamp(latestVersion)
 	}
 
-	newMRs := []*MergeRequest{}
+	var newMRs *MergeRequest
 	var openMRs []*MergeRequest
 	resp := sendAPIRequest("GET", "merge_requests?state=opened&order_by=updated_at", nil, nil)
 	panicIfErr(json.Unmarshal(resp, &openMRs))
 
+	var oldestNotProcessedTS *time.Time
 	for _, mr := range openMRs {
 		if len(mr.Sha) > 0 {
-			lastCommitTs := getMRLastUpdate(mr.Sha)
-			if lastCommitTs.After(lastProcessedMrCommitTs) {
-				newMRs = append(newMRs, mr)
+			lastCommitTs := getMRLastCommitTimestamp(mr.Sha)
+			if lastCommitTs.After(lastProcessedMrCommitTs) && (oldestNotProcessedTS == nil || lastCommitTs.Before(*oldestNotProcessedTS)) {
+				oldestNotProcessedTS = &lastCommitTs
+				newMRs = mr
 			}
 		}
 	}
-
-	if len(newMRs) == 0 {
-		newMRs = append(newMRs, &MergeRequest{Sha: latestVersion})
+	if newMRs == nil {
+		newMRs = &MergeRequest{Sha: latestVersion}
 	}
 
-	return newMRs
+	return []*MergeRequest{newMRs}
 }
 
-func getMRLastUpdate(latestVersion string) time.Time {
-	resp := sendAPIRequest("GET", "repository/commits/"+latestVersion, nil, nil)
+func getMRLastCommitTimestamp(latestVersion string) time.Time {
+	resp := sendAPIRequest("GET", fmt.Sprintf("repository/commits/%s", latestVersion), nil, nil)
 
 	var commit Commit
-	panicIfErr(json.Unmarshal(resp, &commit))
+	panicIfErrMsg(json.Unmarshal(resp, &commit), "Unable to unmarshal merge request the response")
 
-	parsed, err := time.Parse(DateTimeLayout, commit.CommittedDate)
-	panicIfErr(err)
+	// try parsing the time to the expected formats
+	parsed, err := time.Parse(dateLayouts[0], commit.CommittedDate)
+	for i := 1; err != nil && i < len(dateLayouts); i++ {
+		parsed, err = time.Parse(dateLayouts[i], commit.CommittedDate)
+	}
+	panicIfErrMsg(err, "Unable to parse time string")
 
 	return parsed.UTC()
 }
@@ -276,7 +280,8 @@ func sendAPIRequest(method, suburl string, body []byte, header map[string]string
 		return result
 	}
 
-	panic(fmt.Sprintf("request sent to '%s' returned with non-success status: %s", url, resp.Status))
+	panicIfErrMsg(fmt.Errorf(""), fmt.Sprintf("request sent to '%s' returned with non-success status: %s", url, resp.Status))
+	return nil
 }
 
 func decomposeURI() {
@@ -309,13 +314,22 @@ func configureSslVerification() {
 
 func panicIfErr(err error) {
 	if err != nil {
-		fpcs := make([]uintptr, 1)
-		runtime.Callers(2, fpcs)
-		caller := runtime.FuncForPC(fpcs[0] - 1)
-		callerMethod, line := caller.FileLine(fpcs[0] - 1)
-
-		fmt.Fprintf(os.Stderr, "\nPanic at %s : line %d \n", callerMethod, line)
-
+		fmt.Fprintf(os.Stderr, "\npanic at %s:\n", getCallerInfo())
 		panic(err)
 	}
+}
+
+func panicIfErrMsg(err error, msg string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\nError: %s\npanic at %s:\n", msg, getCallerInfo())
+		panic(err)
+	}
+}
+
+func getCallerInfo() string {
+	fpcs := make([]uintptr, 1)
+	runtime.Callers(3, fpcs)
+	caller := runtime.FuncForPC(fpcs[0] - 1)
+	file, line := caller.FileLine(fpcs[0] - 1)
+	return fmt.Sprintf("%s(%d)", file, line)
 }
