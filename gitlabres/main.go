@@ -18,9 +18,9 @@ import (
 )
 
 type Payload struct {
-	Source  Psource           `json:"source"`
-	Version map[string]string `json:"version"`
-	Params  Params            `json:"params"`
+	Source  Psource `json:"source"`
+	Version SHA     `json:"version"`
+	Params  Params  `json:"params"`
 }
 
 type Psource struct {
@@ -32,14 +32,16 @@ type Psource struct {
 	NoSsl               bool   `json:"no_ssl"`
 	SkipSslVerification bool   `json:"skip_ssl_verification"`
 	ConcourseHost       string `json:"concourse_host"`
+	BuildExpiresAfter   string `json:"build_expires_after"`
 }
 
-type Commit struct {
-	CommittedDate string `json:"committed_date"`
+type CommitStatus struct {
+	Status     string `json:"status"`
+	FinishedAt string `json:"finished_at"`
 }
 
-type MergeRequest struct {
-	Sha string `json:"sha"`
+type SHA struct {
+	SHA string `json:"sha"`
 }
 
 type Params struct {
@@ -49,6 +51,7 @@ type Params struct {
 }
 
 const defaultBuildLabel = "Concourse"
+const minimumBuildExpiration = 5
 
 var dateLayouts = [...]string{"2006-01-02T15:04:05.000-07:00", "2006-01-02T15:04:05.000Z"}
 
@@ -175,7 +178,7 @@ func out(sourceFolder string) map[string]map[string]string {
 	}
 }
 
-func in(destFolder string) map[string]map[string]string {
+func in(destFolder string) map[string]interface{} {
 
 	if len(payload.Source.PrivateKey) != 0 {
 		rsaDir := os.ExpandEnv("$HOME/.ssh/")
@@ -199,7 +202,7 @@ func in(destFolder string) map[string]map[string]string {
 	panicIfErrMsg(exec.Command("git", "clone", payload.Source.URI, destFolder).Run(), "Cannot clone the repository")
 	panicIfErrMsg(os.Chdir(destFolder), "Cannot go to destination folder")
 
-	gitmerge := exec.Command("git", "merge", "-m", "local merge", payload.Version["sha"])
+	gitmerge := exec.Command("git", "merge", "-m", "local merge", payload.Version.SHA)
 	stderr, err := gitmerge.StderrPipe()
 	panicIfErr(err)
 	panicIfErr(gitmerge.Start())
@@ -208,49 +211,66 @@ func in(destFolder string) map[string]map[string]string {
 		panicIfErr(fmt.Errorf("merge error: %s/n", string(slurp)))
 	}
 
-	return map[string]map[string]string{"version": payload.Version}
+	return map[string]interface{}{"version": payload.Version}
 }
 
-func check() []*MergeRequest {
+func check() []SHA {
 
-	latestVersion := payload.Version["sha"]
-	lastProcessedMrCommitTs := time.Time{}
-	if len(latestVersion) != 0 {
-		lastProcessedMrCommitTs = getMRLastCommitTimestamp(latestVersion)
-	}
-
-	var newMRs *MergeRequest
-	var openMRs []*MergeRequest
+	var openMRsSHA []SHA
 	resp := sendAPIRequest("GET", "merge_requests?state=opened&order_by=updated_at", nil, nil)
-	panicIfErr(json.Unmarshal(resp, &openMRs))
+	panicIfErr(json.Unmarshal(resp, &openMRsSHA))
 
-	var oldestNotProcessedTS *time.Time
-	for _, mr := range openMRs {
-		if len(mr.Sha) > 0 {
-			lastCommitTs := getMRLastCommitTimestamp(mr.Sha)
-			if lastCommitTs.After(lastProcessedMrCommitTs) && (oldestNotProcessedTS == nil || lastCommitTs.Before(*oldestNotProcessedTS)) {
-				oldestNotProcessedTS = &lastCommitTs
-				newMRs = mr
-			}
+	// find out the first merge request that needs a build
+	for _, mr := range openMRsSHA {
+		if mrNeedsBuild(mr.SHA) {
+			return []SHA{mr}
 		}
 	}
-	if newMRs == nil {
-		newMRs = &MergeRequest{Sha: latestVersion}
-	}
 
-	return []*MergeRequest{newMRs}
+	return []SHA{payload.Version}
 }
 
-func getMRLastCommitTimestamp(latestVersion string) time.Time {
-	resp := sendAPIRequest("GET", fmt.Sprintf("repository/commits/%s", latestVersion), nil, nil)
+// a merge request (mr) needs a build if either hasn't had a build before, or has a successfull build which is expired
+func mrNeedsBuild(latestVersion string) bool {
+	resp := sendAPIRequest("GET", fmt.Sprintf("repository/commits/%s/statuses", latestVersion), nil, nil)
 
-	var commit Commit
-	panicIfErrMsg(json.Unmarshal(resp, &commit), "Unable to unmarshal merge request the response")
+	var commitStatuses []*CommitStatus
+	panicIfErrMsg(json.Unmarshal(resp, &commitStatuses), "Unable to unmarshal merge request the response")
 
-	// try parsing the time to the expected formats
-	parsed, err := time.Parse(dateLayouts[0], commit.CommittedDate)
+	if len(commitStatuses) == 0 {
+		// no builds before for this commit. needs a build
+		return true
+	}
+
+	commitStatus := commitStatuses[0]
+	// first see if it has previously succeeded. No need to rebuild an already failing commit
+	if commitStatus.Status != "success" {
+		return false
+	}
+
+	finishedAt := parseTime(commitStatus.FinishedAt)
+
+	// then see if the given build expiration period is valid
+	expDuration, err := time.ParseDuration(payload.Source.BuildExpiresAfter)
+	panicIfErrMsg(err, "Not a valid duration string. refer to https://golang.org/pkg/time/#ParseDuration")
+	if (minimumBuildExpiration * time.Minute) > expDuration {
+		panicIfErrMsg(fmt.Errorf(""), fmt.Sprintf("the build expiration cannot be less than 5 minutes. Its currently set at %s", payload.Source.BuildExpiresAfter))
+	}
+
+	// then see if the build is expired
+	if finishedAt.Add(expDuration).Before(time.Now().UTC()) {
+		return true
+	}
+
+	return false
+}
+
+func parseTime(timestr string) time.Time {
+
+	// try parsing the finished time to the expected formats
+	parsed, err := time.Parse(dateLayouts[0], timestr)
 	for i := 1; err != nil && i < len(dateLayouts); i++ {
-		parsed, err = time.Parse(dateLayouts[i], commit.CommittedDate)
+		parsed, err = time.Parse(dateLayouts[i], timestr)
 	}
 	panicIfErrMsg(err, "Unable to parse time string")
 
