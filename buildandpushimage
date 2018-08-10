@@ -1,7 +1,7 @@
 #!/bin/bash
 set -o errexit -o nounset
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd $DIR/gitlabres
+cd $DIR/src/gitlabres
 go build
 go test
 
