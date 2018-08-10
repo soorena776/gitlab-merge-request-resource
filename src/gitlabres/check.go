@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-func check() []Version {
+func check() []*Version {
 
-	var openMRsSHA []MergeRequest
+	var openMRsSHA []*MergeRequest
 	resp := sendAPIRequestFunc("GET", "merge_requests?state=opened&order_by=updated_at", nil, nil)
 	exitIfErr(json.Unmarshal(resp, &openMRsSHA))
 
-	needABuild := []Version{}
+	needABuild := []*Version{}
 	// find out the first merge request that needs a build
 	for _, mr := range openMRsSHA {
 
@@ -23,9 +23,9 @@ func check() []Version {
 		exitIfErrMsg(json.Unmarshal(resp, &commitStatuses), "Unable to unmarshal merge request the response")
 		if len(commitStatuses) == 0 {
 			// no builds before for this commit. needs a build
-			needABuild = append(needABuild, Version{SHA: mr.SHA, BuildNum: "Build 1"})
+			needABuild = append(needABuild, &Version{SHA: mr.SHA, BuildNum: "Build 1"})
 		} else if num := nextBuildIfExpired(commitStatuses[0]); num != "" {
-			needABuild = append(needABuild, Version{SHA: mr.SHA, BuildNum: num})
+			needABuild = append(needABuild, &Version{SHA: mr.SHA, BuildNum: num})
 		}
 	}
 

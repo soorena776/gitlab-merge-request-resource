@@ -8,19 +8,19 @@ import (
 	"os/exec"
 )
 
-func in(destFolder string) map[string]Version {
+func in(destFolder string) *map[string]*Version {
 
 	setupGitCreds()
 	cloneGitRepository(destFolder)
 
-	//write version info the git folder
+	//write version info the git folde
 	targetVersion, err := json.Marshal(pl.Version)
 	exitIfErr(err)
 	exitIfErr(ioutil.WriteFile(fmt.Sprintf("%s/%s", destFolder, versionFile), targetVersion, 0644))
 
 	mergeGitRepository(destFolder)
 
-	return map[string]Version{"version": pl.Version}
+	return &map[string]*Version{"version": &pl.Version}
 }
 
 func setupGitCreds() {

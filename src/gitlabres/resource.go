@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-var pl Payload
+var pl = &Payload{}
 
 func main() {
 	cmd := filepath.Base(os.Args[0])

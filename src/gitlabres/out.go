@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func out(sourceFolder string) map[string]map[string]string {
+func out(sourceFolder string) *map[string]*Version {
 
 	if len(pl.Params.Repository) == 0 {
 		panic("please specify a repository")
@@ -49,9 +49,5 @@ func out(sourceFolder string) map[string]map[string]string {
 
 	sendAPIRequestFunc("POST", "statuses/"+targetVersion.SHA, bodyJSON, header)
 
-	return map[string]map[string]string{
-		"version": map[string]string{
-			"sha": fmt.Sprintf("%s", targetVersion.SHA),
-		},
-	}
+	return &map[string]*Version{"version": &targetVersion}
 }

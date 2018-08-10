@@ -32,7 +32,7 @@ func Teardown() {
 func Test__CorrectParametersArePassedToGitlabApi(t *testing.T) {
 	assert := assert.New(t)
 
-	pl = Payload{Source: Psource{URI: "uri"}}
+	pl = &Payload{Source: Psource{URI: "uri"}}
 	mr = []*MergeRequest{&MergeRequest{SHA: "somesha"}}
 	cs = []*CommitStatus{&CommitStatus{Description: "Build 1", FinishedAt: "2018-08-09T14:46:33.940Z", Status: "success"}}
 	sendAPIRequestFunc = func(method string, suburl string, body []byte, header map[string]string) (bytes []byte) {
@@ -79,7 +79,7 @@ func Test__MrNeedsRebuildAndFreshMR_ReturnsExpected(t *testing.T) {
 
 	mockGitlabAPI()
 
-	pl = Payload{Source: Psource{BuildExpiresAfter: "1h"}}
+	pl = &Payload{Source: Psource{BuildExpiresAfter: "1h"}}
 	mr = []*MergeRequest{
 		&MergeRequest{SHA: "expired"},
 		&MergeRequest{SHA: "notExpired"},
@@ -101,7 +101,7 @@ func Test__MrNeedsRebuildAndFreshMR_ReturnsExpected(t *testing.T) {
 
 	resp := check()
 
-	resMap := funk.Map(resp, func(v Version) (string, string) {
+	resMap := funk.Map(resp, func(v *Version) (string, string) {
 		return v.SHA, v.BuildNum
 	}).(map[string]string)
 
