@@ -1,9 +1,9 @@
 # GitLab Merge Request Concourse Resource
 
 Features:
+- Check for new merge requests on GitLab and update the merge request pipeline (build) status
+- Rebuild expired builds and update the status
 - Written entirely in Go
-- To check for new merge requests on GitLab and update the merge request status
-- To rebuild expired builds and update the status
 
 ## Source Configuration
 
@@ -50,9 +50,9 @@ resources:
 
 ## Behavior
 
-### `check`: Check for new merge requests
+### `check`: Check for new merge requests, and build-expired merge requests
 
-Checks if there are new merge requests or merge requests with new commits. Also, checks if any of the already built merge requests are expired by according to `build_expires_after` parameter.
+Checks if there are new merge requests or merge requests with new commits. Also, checks if any of the already built merge requests are expired, according to given `build_expires_after` parameter.
 
 ### `in`: Clone merge request source branch and Merge it with master
 
