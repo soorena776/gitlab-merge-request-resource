@@ -1,6 +1,9 @@
 # GitLab Merge Request Concourse Resource
 
-A concourse resource to check for new merge requests on GitLab and update the merge request status.
+Features:
+- Written entirely in Go
+- To check for new merge requests on GitLab and update the merge request status
+- To rebuild expired builds and update the status
 
 ## Source Configuration
 
@@ -40,6 +43,8 @@ resources:
 * `password`: The password for HTTP(S) auth when pulling
 * `no_ssl`: Set to `true` if the GitLab API should be used over HTTP instead of HTTPS
 * `skip_ssl_verification`: Optional. Connect to GitLab insecurely - i.e. skip SSL validation. Defaults to false if not provided.
+* `concourse_host`: The url:port for concourse web interface (ATC), so that the builds are linked to gitlab pipelines and can be navigated to from gitlab commit.
+* `build_expires_after`: A [time duration](https://golang.org/pkg/time/#ParseDuration), which is used to deem an already successful build as expired, hence kicking off new buid automatically. 
 
 > Please note that you have to provide either `private_key` or `username` and `password`.
 
@@ -47,11 +52,11 @@ resources:
 
 ### `check`: Check for new merge requests
 
-Checks if there are new merge requests or merge requests with new commits.
+Checks if there are new merge requests or merge requests with new commits. Also, checks if any of the already built merge requests are expired by according to `build_expires_after` parameter.
 
-### `in`: Clone merge request source branch
+### `in`: Clone merge request source branch and Merge it with master
 
-`git clone`s the source branch of the respective merge request.
+`git clone`s the source branch of the respective merge request, and then merges it with master branch. Failure in merge results in a failed status.
 
 ### `out`: Update a merge request's merge status
 
@@ -72,6 +77,7 @@ jobs:
   - get: repo
     resource: repo-mr
     trigger: true
+    version: every
   - put: repo-mr
     params:
       repository: repo
