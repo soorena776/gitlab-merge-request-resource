@@ -12,7 +12,7 @@ resource_types:
 - name: merge-request
   type: docker-image
   source:
-    repository: mastertinner/gitlab-merge-request-resource
+    repository: soorena776/gitlab-merge-request-resource
 
 resources:
 - name: repo-mr
