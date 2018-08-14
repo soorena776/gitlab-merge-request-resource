@@ -49,4 +49,4 @@ type Params struct {
 
 const defaultBuildLabel = "Concourse"
 const minimumBuildExpiration = 1
-const versionFile = "/target_version.txt"
+const versionFile = "target_version.txt"
