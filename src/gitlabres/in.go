@@ -8,23 +8,32 @@ import (
 	"os/exec"
 )
 
-func in(destFolder string) *map[string]*Version {
+func in(destFolder string) *map[string]interface{} {
 
 	setupGitCreds()
 	cloneGitRepository(destFolder)
 
+	metadata := getMetadata(destFolder)
+	metadataJSON, err := json.Marshal(metadata)
 	//write version info the git folde
 	targetVersion, err := json.Marshal(pl.Version)
 	exitIfErr(err)
 	exitIfErr(ioutil.WriteFile(fmt.Sprintf("%s/%s", destFolder, versionFile), targetVersion, 0644))
+	exitIfErr(ioutil.WriteFile(fmt.Sprintf("%s/%s", destFolder, "metadata.json"), metadataJSON, 0644))
 
 	mergeGitRepository(destFolder)
 
-	return &map[string]*Version{"version": &pl.Version}
+	result := &map[string]interface{}{
+		"version":  &map[string]string{"sha": pl.Version.SHA},
+		"metadata": metadata,
+	}
+
+	return result
 }
 
 func setupGitCreds() {
 	if len(pl.Source.PrivateKey) != 0 {
+
 		rsaDir := os.ExpandEnv("$HOME/.ssh/")
 		exitIfErr(os.MkdirAll(rsaDir, os.ModeDir|0744))
 		exitIfErr(ioutil.WriteFile(rsaDir+"id_rsa", []byte(pl.Source.PrivateKey), 0500))

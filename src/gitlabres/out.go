@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func out(sourceFolder string) *map[string]*Version {
+func out(sourceFolder string) *map[string]interface{} {
 
 	if len(pl.Params.Repository) == 0 {
 		panic("please specify a repository")
@@ -24,9 +24,13 @@ func out(sourceFolder string) *map[string]*Version {
 	}
 
 	targetVersionBytes, err := ioutil.ReadFile(fmt.Sprintf("%s/%s/%s", sourceFolder, pl.Params.Repository, versionFile))
+	metadataJSONBytes, err := ioutil.ReadFile(fmt.Sprintf("%s/%s/%s", sourceFolder, pl.Params.Repository, "metadata.json"))
 	exitIfErr(err)
 	targetVersion := Version{}
 	exitIfErr(json.Unmarshal(targetVersionBytes, &targetVersion))
+
+	metadata := []*GitMetadata{}
+	exitIfErr(json.Unmarshal(metadataJSONBytes, &metadata))
 
 	targetURL := fmt.Sprintf("%s/teams/%s/pipelines/%s/jobs/%s/builds/%s",
 		pl.Source.ConcourseHost,
@@ -47,7 +51,14 @@ func out(sourceFolder string) *map[string]*Version {
 		"Content-Type": "application/json",
 	}
 
+	metadata = append(metadata, &GitMetadata{Name: "build_num", Value: targetVersion.BuildNum})
+
 	sendAPIRequestFunc("POST", "statuses/"+targetVersion.SHA, bodyJSON, header)
 
-	return &map[string]*Version{"version": &targetVersion}
+	result := &map[string]interface{}{
+		"version":  &map[string]string{"sha": targetVersion.SHA},
+		"metadata": metadata,
+	}
+
+	return result
 }

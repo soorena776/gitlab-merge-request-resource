@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -151,15 +152,35 @@ func configureSslVerification() (err error) {
 	return
 }
 
+func runCommand(command string) string {
+	fields := strings.Fields(command)
+	prog := fields[0]
+	params := fields[1:]
+
+	cmd := exec.Command(prog, params...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+
+	errmsg := stderr.String()
+	if err != nil || len(errmsg) > 0 {
+		log.Fatalf("\nError at %v\nerror running the command: %v\n%s\n%s\n%v:", getCallerInfo(), command, stderr.String(), stdout.String(), err)
+	}
+
+	return stdout.String()
+}
+
 func exitIfErr(err error) {
 	if err != nil {
-		log.Fatalf("\nError at %s:\n", getCallerInfo())
+		log.Fatalf("\nError at %s:\n%v\n", getCallerInfo(), err)
 	}
 }
 
 func exitIfErrMsg(err error, msg string) {
 	if err != nil {
-		log.Fatalf("\nError at %s:\n%s\n", getCallerInfo(), msg)
+		log.Fatalf("\nError at %s:\n%s\n%v", getCallerInfo(), msg, err)
 	}
 }
 

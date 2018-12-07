@@ -41,6 +41,12 @@ type Version struct {
 	BuildNum string `json:"build_num"`
 }
 
+type GitMetadata struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}
+
 type Params struct {
 	Repository string `json:"repository"`
 	Status     string `json:"status"`
