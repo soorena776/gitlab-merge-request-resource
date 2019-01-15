@@ -40,11 +40,9 @@ func sendAPIRequest(method, suburl string, body []byte, header map[string]string
 }
 
 func cloneGitRepository(destFolder string) {
+
+	log.Printf("Checking out soruce branch at SHA:%v into folder:%v \n", pl.Version.SHA, destFolder)
 	exitIfErrMsg(exec.Command("git", "clone", pl.Source.URI, destFolder).Run(), "Cannot clone the repository")
 	exitIfErrMsg(os.Chdir(destFolder), "Cannot go to destination folder")
 	exitIfErrMsg(exec.Command("git", "checkout", "-b", "local_branch", pl.Version.SHA).Run(), "Cannot checkout the commit into a new branch")
-}
-
-func mergeGitRepository(destFolder string) {
-	log.Println("merging with master:", runCommand("git merge master -m local_merge"))
 }

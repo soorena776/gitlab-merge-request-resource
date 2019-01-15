@@ -21,8 +21,6 @@ func in(destFolder string) *map[string]interface{} {
 	exitIfErr(ioutil.WriteFile(fmt.Sprintf("%s/%s", destFolder, versionFile), targetVersion, 0644))
 	exitIfErr(ioutil.WriteFile(fmt.Sprintf("%s/%s", destFolder, "metadata.json"), metadataJSON, 0644))
 
-	mergeGitRepository(destFolder)
-
 	result := &map[string]interface{}{
 		"version":  &map[string]string{"sha": pl.Version.SHA},
 		"metadata": metadata,
